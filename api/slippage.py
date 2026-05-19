@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from http.server import BaseHTTPRequestHandler
+from urllib.parse import urlparse
 
 import httpx
 
@@ -17,6 +19,30 @@ from slippage_labs.venues import (
     VenueError,
 )
 
+_KALSHI_TICKER_RE = re.compile(r"^[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+$")
+
+
+def _normalize_url(raw: str) -> str:
+    """Rewrite Kalshi market-page URLs into a bare event ticker.
+
+    Kalshi market URLs look like /markets/{series}/{slug}/{ticker}. The upstream
+    adapter scans the whole URL for an uppercase ticker pattern and would
+    otherwise latch onto the slug (e.g. 'UFC-FIGHT') before the real ticker.
+    """
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return raw
+    if (parsed.hostname or "").lower() not in ("kalshi.com", "www.kalshi.com"):
+        return raw
+    segments = [s for s in parsed.path.split("/") if s]
+    if not segments:
+        return raw
+    candidate = segments[-1].upper()
+    if _KALSHI_TICKER_RE.fullmatch(candidate):
+        return candidate
+    return raw
+
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
@@ -27,9 +53,11 @@ class handler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             return self._error(400, "invalid JSON body")
 
-        url = (body.get("url") or "").strip()
-        if not url:
+        raw_url = (body.get("url") or "").strip()
+        if not raw_url:
             return self._error(400, "missing 'url'")
+        url = _normalize_url(raw_url)
+        was_normalized = url != raw_url
 
         try:
             budget = float(body.get("budget", 500))
@@ -62,7 +90,13 @@ class handler(BaseHTTPRequestHandler):
         try:
             event = venue.resolve(url)
         except MarketNotFoundError as e:
-            return self._error(404, str(e))
+            msg = str(e)
+            if was_normalized:
+                msg += (
+                    " (Tip: the URL you pasted looks like a specific market — "
+                    "try the parent event URL from kalshi.com instead.)"
+                )
+            return self._error(404, msg)
         except (httpx.HTTPError, VenueError) as e:
             return self._error(502, f"upstream error resolving event: {e}")
 
