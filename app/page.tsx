@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 type Result = {
   market: { id: string; title: string };
@@ -83,6 +84,14 @@ export default function Page() {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-16">
+      <nav className="mb-8 flex justify-end">
+        <Link
+          href="/how-to-use"
+          className="text-sm text-neutral-300 hover:text-white underline underline-offset-4"
+        >
+          How to use this tool
+        </Link>
+      </nav>
       <header className="mb-12">
         <h1 className="text-3xl font-semibold tracking-tight">slippage-labs</h1>
         <p className="mt-2 text-sm text-neutral-400">
