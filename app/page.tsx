@@ -107,6 +107,38 @@ export default function Page() {
     } catch {
       // localStorage unavailable (private mode, SSR edge) — skip silently
     }
+
+    let engaged = false;
+    const markEngaged = (trigger: "interaction" | "dwell") => {
+      if (engaged) return;
+      engaged = true;
+      const dwellMs = Date.now() - mountedAt;
+      let engagedCount = 0;
+      try {
+        engagedCount =
+          (parseInt(localStorage.getItem("sl_engaged_count") || "0", 10) || 0) + 1;
+        localStorage.setItem("sl_engaged_count", `${engagedCount}`);
+      } catch {}
+      track("engaged_session", {
+        trigger,
+        dwell_ms: dwellMs,
+        engaged_count: engagedCount,
+      });
+      cleanup();
+    };
+    const mountedAt = Date.now();
+    const onInteract = () => markEngaged("interaction");
+    const dwellTimer = window.setTimeout(() => markEngaged("dwell"), 20_000);
+    window.addEventListener("pointerdown", onInteract, { once: true });
+    window.addEventListener("keydown", onInteract, { once: true });
+    window.addEventListener("scroll", onInteract, { once: true, passive: true });
+    function cleanup() {
+      window.clearTimeout(dwellTimer);
+      window.removeEventListener("pointerdown", onInteract);
+      window.removeEventListener("keydown", onInteract);
+      window.removeEventListener("scroll", onInteract);
+    }
+    return cleanup;
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
