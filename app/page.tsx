@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { track } from "@vercel/analytics";
 
 type Result = {
   market: { id: string; title: string };
@@ -57,6 +58,57 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResponse | null>(null);
 
+  useEffect(() => {
+    try {
+      const now = Date.now();
+      const DAY = 86_400_000;
+      let vid = localStorage.getItem("sl_vid");
+      const isNew = !vid;
+      if (!vid) {
+        vid =
+          (typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `${now}-${Math.random().toString(36).slice(2)}`);
+        localStorage.setItem("sl_vid", vid);
+      }
+
+      const lastVisit = parseInt(localStorage.getItem("sl_last_visit") || "0", 10);
+      const firstVisit = parseInt(
+        localStorage.getItem("sl_first_visit") || `${now}`,
+        10,
+      );
+      if (!localStorage.getItem("sl_first_visit")) {
+        localStorage.setItem("sl_first_visit", `${now}`);
+      }
+
+      const visitCount =
+        (parseInt(localStorage.getItem("sl_visit_count") || "0", 10) || 0) + 1;
+      localStorage.setItem("sl_visit_count", `${visitCount}`);
+
+      const daysSinceLast = lastVisit ? Math.floor((now - lastVisit) / DAY) : -1;
+      const daysSinceFirst = Math.floor((now - firstVisit) / DAY);
+
+      let cohort: "new" | "returning_today" | "returning_week" | "returning_month" | "dormant_revival";
+      if (isNew) cohort = "new";
+      else if (daysSinceLast <= 0) cohort = "returning_today";
+      else if (daysSinceLast <= 7) cohort = "returning_week";
+      else if (daysSinceLast <= 30) cohort = "returning_month";
+      else cohort = "dormant_revival";
+
+      track("session_start", {
+        cohort,
+        visit_count: visitCount,
+        days_since_last_visit: daysSinceLast,
+        days_since_first_visit: daysSinceFirst,
+        is_new: isNew,
+      });
+
+      localStorage.setItem("sl_last_visit", `${now}`);
+    } catch {
+      // localStorage unavailable (private mode, SSR edge) — skip silently
+    }
+  }, []);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -75,6 +127,18 @@ export default function Page() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `request failed (${res.status})`);
       setData(json);
+      try {
+        const total =
+          (parseInt(localStorage.getItem("sl_quote_count") || "0", 10) || 0) + 1;
+        localStorage.setItem("sl_quote_count", `${total}`);
+        track("quote_run", {
+          venue: json.venue,
+          total_quotes: total,
+          is_first_quote: total === 1,
+        });
+      } catch {
+        track("quote_run", { venue: json.venue });
+      }
     } catch (err: any) {
       setError(err.message || "something went wrong");
     } finally {
